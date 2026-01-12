@@ -9,7 +9,6 @@ class Admin(commands.Cog):
         self.bot = bot
 
     @commands.command(name="sync")
-    @commands.is_owner() # Solo tú puedes usarlo
     async def sync(self, ctx):
         """
         Sincroniza los comandos slash INSTANTÁNEAMENTE en este servidor.
