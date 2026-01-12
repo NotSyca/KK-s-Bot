@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+import MusicCog
 import os
 import time
 import random
@@ -219,6 +220,7 @@ class GeminiChat(commands.Cog):
                     await message.channel.send(f"va, pongo `{q}`")
                     # VERIFICA QUE play_query EXISTA EN TU MUSIC BOT
                     if hasattr(music_cog, "play"):
+                        await MusicCog.play(message, q)
                         await music_cog.play(message, q)
                     else:
                         logger.error("❌ [METHOD-ERROR] 'MusicCog' no tiene método 'play_query'.")
