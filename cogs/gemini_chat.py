@@ -193,9 +193,7 @@ class GeminiChat(commands.Cog):
         if message.author.bot: return
         
         # 1. CIRCUIT BREAKER CHECK
-        # Si la API está bloqueada, ignoramos todo para no spamear logs ni quemar CPU
-        if time.time() < self.api_blocked_until:
-            return
+        if time.time() < self.api_blocked_until: return
 
         cid = str(message.channel.id)
         clean = message.content.strip()
@@ -203,7 +201,7 @@ class GeminiChat(commands.Cog):
 
         if not clean: return
 
-        # 2. CHEQUEO DE SILENCIO ADMIN
+        # 2. SILENCIO ADMIN
         if cid in self.forced_silence:
             until = self.forced_silence[cid]
             if until and now < until: return
@@ -211,77 +209,99 @@ class GeminiChat(commands.Cog):
 
         # 3. ACTUALIZAR MEMORIA
         is_mentioned = self.bot.user in message.mentions
-        looks_talking = "?" in clean or len(clean.split()) <= 4
-        talked = is_mentioned or looks_talking
-
+        talked = is_mentioned or ("?" in clean or len(clean.split()) <= 4)
+        
         self._update_channel_mood(cid, clean)
         self._update_user_memory(str(message.author.id), clean, talked)
 
-        # 4. CHEQUEO DE AUTO-SILENCIO (CALENTURA)
+        # 4. AUTO-SILENCIO
         if self._is_heated(clean):
-            self.silenced_until[cid] = now + 1800 # 30 min
+            self.silenced_until[cid] = now + 1800
             return
-        if cid in self.silenced_until and now < self.silenced_until[cid]:
-            return
+        if cid in self.silenced_until and now < self.silenced_until[cid]: return
 
-        # 5. DETECCIÓN DE INTENCIÓN (OPTIMIZADA)
-        # Solo gastamos tokens si parece un comando de música
+        # =========================================================
+        # 5. DETECCIÓN DE INTENCIÓN (AHORA CON ROTACIÓN)
+        # =========================================================
+        handled_intent = False
         if self._needs_intent_check(clean):
-            try:
-                # Intento 1
-                intent = await self._attempt_intent_detect(clean)
-                if intent["intent"] != "none":
-                    await self._handle_intent(intent, message)
-                    self.last_bot_reply[cid] = now
-                    return # Si fue comando, no charlamos
-            except ResourceExhausted:
-                # Manejo simple para intent: Si falla, asumimos que no es comando y seguimos
-                # Si falla mucho, el chat normal activará el circuit breaker luego
-                logging.warning("[INTENT] Falló detección por quota. Ignorando.")
+            # Llamamos al nuevo método seguro
+            handled_intent = await self._handle_intent_safe(message, clean)
+            
+            if handled_intent:
+                self.last_bot_reply[cid] = now
+                return # Si fue comando, salimos y no responde como chat
 
-        # 6. DECISIÓN DE HABLAR
+        # 6. DECISIÓN DE HABLAR (CHAT)
         should_reply = False
         if is_mentioned:
             should_reply = True
         elif now - self.last_bot_reply.get(cid, 0) > self.COOLDOWN:
-            chance = self.BASE_CHANCE
-            if random.random() < chance:
+            if random.random() < self.BASE_CHANCE:
                 should_reply = True
 
         if should_reply:
             async with message.channel.typing():
                 reply_text = None
                 
-                # BUCLE DE REINTENTO (Retry Logic)
+                # Bucle de reintento CHAT
                 for attempt in range(2):
                     try:
                         reply_text = await self._attempt_chat_reply(cid, clean)
-                        break # Éxito, salimos del loop
-                    
+                        break 
                     except ResourceExhausted:
                         if attempt == 0:
-                            # Primer fallo: Rotamos y reseteamos sesión
-                            logging.warning(f"[CHAT] Quota agotada (Key {self.key_manager.current_index}). Rotando...")
+                            logging.warning(f"[CHAT] Quota agotada. Rotando...")
                             self.key_manager.rotate()
-                            if cid in self.chats: del self.chats[cid] # Forzar recreación
+                            if cid in self.chats: del self.chats[cid]
                             continue
                         else:
-                            # Segundo fallo: Ambas keys muertas -> CIRCUIT BREAKER
-                            logging.error("[CHAT] TODAS LAS KEYS AGOTADAS. Activando Circuit Breaker (60s).")
+                            logging.error("[CHAT] Circuit Breaker activado.")
                             self.api_blocked_until = time.time() + 60
-                            reply_text = "estoy mareado, dame un minuto..."
-                    
-                    except Exception as e:
-                        logging.error(f"[CHAT] Error desconocido: {e}")
+                            reply_text = "estoy frito..."
+                    except Exception:
                         break
 
                 if reply_text:
                     self.last_bot_reply[cid] = now
                     await message.channel.send(reply_text)
-
+                    
     # =====================================================
     # MANEJO DE INTENCIONES
     # =====================================================
+    async def _handle_intent_safe(self, message, clean):
+        """Maneja la detección de intención con rotación de keys."""
+        
+        # Bucle de intentos idéntico al del chat
+        for attempt in range(2):
+            try:
+                # 1. Intentamos detectar
+                intent = await self.intent_ai.detect(clean)
+                
+                # 2. Si detecta algo que no es "none", ejecutamos
+                if intent["intent"] != "none":
+                    await self._handle_intent(intent, message)
+                    return True # Indica que se manejó una intención (para no hablar luego)
+                
+                return False # No hubo intención, seguimos al chat
+
+            except ResourceExhausted:
+                # 3. MANEJO DE ERROR DE QUOTA
+                if attempt == 0:
+                    logging.warning(f"[INTENT] Quota agotada en Key #{self.key_manager.current_index}. Rotando...")
+                    self.key_manager.rotate()
+                    # No necesitamos recrear sesión aquí porque IntentAI no tiene historial
+                    continue 
+                else:
+                    logging.error("[INTENT] Falló detección con ambas keys. Ignorando.")
+                    return False # Asumimos que no hay intención para no bloquear
+            
+            except Exception as e:
+                logging.error(f"[INTENT] Error general: {e}")
+                return False
+        
+        return False
+    
     async def _handle_intent(self, intent, message):
         music = self.bot.get_cog("MusicCog")
         if not music: return
