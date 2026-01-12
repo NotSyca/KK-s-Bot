@@ -71,7 +71,7 @@ class GeminiChat(commands.Cog):
                     # 2. Selección de Modelo
                     # Intentamos usar el modelo más estándar. 
                     # Si debug_ai te da otros nombres, cambia esta línea.
-                    model_name = "gemini-1.5-pro-latest"
+                    model_name = "gemini-1.5-pro"
 
                     # 3. Generación
                     response = await self.client.aio.models.generate_content(
