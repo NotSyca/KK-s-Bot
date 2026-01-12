@@ -36,30 +36,68 @@ class KeyManager:
         if not self.keys:
             logger.critical("❌ CRITICAL: No se encontraron API Keys en .env")
         else:
-            logger.info(f"✅ KeyManager inicializado con {len(self.keys)} llaves.")
+            logger.info(f"✅ KeyManager cargado con {len(self.keys)} llaves.")
         
         self.current_index = 0
+        # Configuramos la primera por defecto, pero se validará en on_ready
         if self.keys:
             self._configure()
 
     def _configure(self):
+        """Aplica la configuración de la key actual."""
         key = self.keys[self.current_index]
         genai.configure(api_key=key)
-        logger.info(f"🔑 [KEY-SWITCH] Cambiado a Key Indice {self.current_index} (***{key[-4:]})")
+        logger.info(f"🔑 [CONFIG] Key activa: Índice {self.current_index} (***{key[-4:]})")
 
     def rotate(self):
+        """Pasa a la siguiente key disponible."""
         if not self.keys: return
-        logger.warning(f"🔄 [ROTACION] Rotando key desde índice {self.current_index}...")
+        
+        logger.warning(f"🔄 [ROTACION] Cambiando de Key {self.current_index} a la siguiente...")
         self.current_index = (self.current_index + 1) % len(self.keys)
         self._configure()
+
+    async def find_working_key(self, model_name):
+        """
+        Prueba las keys una por una al inicio.
+        Se queda con la primera que funcione.
+        """
+        if not self.keys: return False
+
+        logger.info("🔎 [STARTUP] Buscando una API Key funcional...")
+        
+        # Probamos tantas veces como keys tengamos
+        for _ in range(len(self.keys)):
+            try:
+                # Prueba ligera: Generar un token
+                model = genai.GenerativeModel(model_name)
+                # Petición mínima para gastar lo menos posible pero validar estado
+                await model.generate_content_async("ping")
+                
+                logger.info(f"✅ [STARTUP] La Key #{self.current_index} está operativa. Se usará esta.")
+                return True
+                
+            except ResourceExhausted:
+                logger.warning(f"⚠️ [STARTUP] Key #{self.current_index} agotada/limitada. Probando siguiente...")
+                self.rotate()
+            except Exception as e:
+                logger.error(f"❌ [STARTUP] Key #{self.current_index} error: {e}. Probando siguiente...")
+                self.rotate()
+
+        logger.critical("⛔ [STARTUP] TODAS LAS KEYS ESTÁN AGOTADAS O ROTAS.")
+        return False
 
 # =========================================================
 # IA DE INTENCIÓN (CON LOGS DE RESPUESTA RAW)
 # =========================================================
 class IntentAI:
     def __init__(self, model_name):
+        self.model_name = model_name 
+        self._init_model()
+
+    def _init_model(self):
         self.model = genai.GenerativeModel(
-            model_name=model_name,
+            model_name=self.model_name,
             system_instruction=(
                 "detectas intenciones en mensajes de discord.\n"
                 "respondes SOLO json valido.\n"
@@ -69,22 +107,11 @@ class IntentAI:
         )
 
     async def detect(self, text: str) -> dict:
-        logger.info(f"🧠 [INTENT-AI] Analizando texto: '{text}'")
-        # Usamos generate_content normal (sin chat history) para intenciones
         r = await self.model.generate_content_async(text)
-        
-        raw_text = r.text
-        logger.debug(f"📝 [INTENT-RAW] Respuesta IA: {raw_text}")
-
-        # Limpieza agresiva de JSON
-        clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-        
+        clean = r.text.replace("```json", "").replace("```", "").strip()
         try:
-            parsed = json.loads(clean_text)
-            logger.info(f"✅ [INTENT-PARSED] Detectado: {parsed}")
-            return parsed
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ [INTENT-ERROR] JSON Invalido: {e}. Texto: {clean_text}")
+            return json.loads(clean)
+        except:
             return {"intent": "none", "query": None}
 
 # =========================================================
@@ -112,6 +139,19 @@ class GeminiChat(commands.Cog):
 
         self.intent_ai = IntentAI(self.MODEL_NAME)
         self._load_memory()
+        
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # Esperamos un poco para no saturar si el bot reconecta rápido
+        logger.info("🤖 GeminiChat Cog listo. Verificando estado de APIs...")
+        
+        working = await self.key_manager.find_working_key(self.MODEL_NAME)
+        
+        if not working:
+            logger.error("💀 [SISTEMA] El bot arranca sin keys funcionales. Se activará Circuit Breaker.")
+            self.api_blocked_until = time.time() + 60
+        else:
+            logger.info("🚀 [SISTEMA] Sistema Gemini inicializado correctamente.")
 
     # ... (MÉTODOS DE MEMORIA Y UTILIDADES IGUALES) ...
     def _load_memory(self):
