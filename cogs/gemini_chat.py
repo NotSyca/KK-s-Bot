@@ -102,6 +102,9 @@ class GeminiChat(commands.Cog):
         self.BASE_CHANCE = 0.25
 
         self.intent_ai = IntentAI(self.MODEL_NAME)
+        
+        self.bot_name = "botsi"
+        self.call_ai = CallAI(self.MODEL_NAME, self.bot_name)
 
         self._load_memory()
 
