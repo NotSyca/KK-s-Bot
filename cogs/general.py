@@ -19,8 +19,7 @@ class General(commands.Cog):
     @app_commands.command(name="ping", description="Ver la latencia del bot")
     async def ping(self, interaction: discord.Interaction):
         latency = round(self.bot.latency * 1000)
-        await self.tree.sync()
-        print(f"Comando /ping usado por {interaction.user}")
+        logger.info(f"Comando /ping usado por {interaction.user}")
         
         embed = discord.Embed(
             title="🏓 Pong!",

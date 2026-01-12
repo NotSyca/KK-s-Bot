@@ -7,8 +7,14 @@ class Admin(commands.Cog):
 
     # Aquí tus comandos...
     @commands.command()
-    async def ping(self, ctx):
-        await ctx.send("Pong!")
+    async def ping(self, interaction: discord.Interaction):
+        latency = round(self.bot.latency * 1000)
+        embed = discord.Embed(
+            title="🏓 Pong!",
+            description=f"Latencia: **{latency}ms**",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
 
 # --- ESTO ES LO QUE TE FALTA ---
 async def setup(bot):
