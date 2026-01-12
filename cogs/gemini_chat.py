@@ -200,7 +200,7 @@ class GeminiChat(commands.Cog):
         
         # 1. VERIFICAR COG
         # IMPORTANTE: Asegúrate de que tu Music Cog se llama "MusicCog" en el setup del bot
-        music_cog = self.bot.get_cog("MusicCog") 
+        music_cog = self.bot.get_cog("MusicLocal") 
         
         if not music_cog:
             logger.error("❌ [ACTION-ERROR] No se encontró el Cog 'MusicCog'. ¿Está cargado? ¿Tiene otro nombre?")
