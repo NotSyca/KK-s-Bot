@@ -29,11 +29,11 @@ class GeminiChat(commands.Cog):
             models_found = []
             # La respuesta suele ser iterable directamente en el nuevo SDK
             for model in response:
-                # Filtramos solo los que sirven para chatear (generateContent)
-                if "generateContent" in (model.supported_generation_methods or []):
-                    # Guardamos el nombre limpio (quitando 'models/')
-                    name = model.name.split("/")[-1]
+                methods = getattr(model, "supported_generation_methods", [])
+                if methods and "generateContent" in methods:
+                    name = model.name.replace("models/", "")
                     models_found.append(name)
+
             
             if models_found:
                 lista_txt = ", ".join(models_found[:10]) # Mostramos solo los primeros 10
@@ -71,7 +71,7 @@ class GeminiChat(commands.Cog):
                     # 2. Selección de Modelo
                     # Intentamos usar el modelo más estándar. 
                     # Si debug_ai te da otros nombres, cambia esta línea.
-                    model_name = "gemini-1.5-flash"
+                    model_name = "gemini-1.5-pro-latest"
 
                     # 3. Generación
                     response = await self.client.aio.models.generate_content(
@@ -92,7 +92,7 @@ class GeminiChat(commands.Cog):
                     print(f"❌ Error Gemini: {e}")
                     err_msg = str(e)
                     if "404" in err_msg:
-                        await message.reply("❌ Error de Modelo: `gemini-1.5-flash` no encontrado. Usa `!debug_ai` para ver el nombre correcto.")
+                        await message.reply("❌ Error de Modelo: `gemini-1.5-flash` no encontrado. Usa `.debug_ai` para ver el nombre correcto.")
                     elif "429" in err_msg:
                         await message.reply("⏳ Estoy saturado (Rate Limit). Espera un poco.")
                     else:
