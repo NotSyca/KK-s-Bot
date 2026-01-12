@@ -229,6 +229,7 @@ class GeminiChat(commands.Cog):
             self.last_bot_reply[cid] = time.time()
             return res.text
         except ResourceExhausted:
+            print(ResourceExhausted)
             return "me quede sin energia, despues sigo"
 
     # =====================================================
