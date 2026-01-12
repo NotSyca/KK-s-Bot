@@ -19,7 +19,7 @@ class GeminiChat(commands.Cog):
         genai.configure(api_key=api_key)
         
         # Configuración del Modelo
-        self.model_name = 'gemini-1.5-flash'
+        self.model_name = 'gemini-3-flash-preview'
         self.system_instruction = (
             "sos un participante mas del chat. hablas normal, sin usar signos de apertura como ¡ o ¿. "
             "escribis de forma corta y casual, como un amigo mas. no sos un asistente. "
