@@ -10,7 +10,7 @@ load_dotenv()
 class Bot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix="!",
+            command_prefix="-",
             intents=discord.Intents.all(), # O ajusta según necesites
             help_command=None
         )
