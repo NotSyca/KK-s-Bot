@@ -16,10 +16,6 @@ class Admin(commands.Cog):
         await ctx.send("🔄 Sincronizando comandos en este servidor...")
         
         try:
-            # 1. Copia los comandos globales a este servidor específico
-            self.bot.tree.copy_global_to(guild=ctx.guild)
-            
-            # 2. Sincroniza solo con este servidor (Instantáneo)
             synced = await self.bot.tree.sync(guild=ctx.guild)
             
             logger.info(f"Slash commands sincronizados localmente: {len(synced)}")
