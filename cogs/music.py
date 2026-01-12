@@ -14,8 +14,8 @@ class Music(commands.Cog):
         # Para desarrollo usaremos uno público de "Lavalink List".
         nodes = [
             wavelink.Node(
-                uri="http://lavalink.devamop.in:443",
-                password="DevamOP"
+                uri="http://node.raidenbot.xyz:5500",  # Nota: http y puerto 5500
+                password="pwd"
             )
         ]
         # Conectamos Wavelink al iniciar el Cog
