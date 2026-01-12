@@ -1,21 +1,34 @@
 import discord
 from discord.ext import commands
+import logging
+
+logger = logging.getLogger("bot")
 
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # Aquí tus comandos...
-    @commands.command()
-    async def ping(self, interaction: discord.Interaction):
-        latency = round(self.bot.latency * 1000)
-        embed = discord.Embed(
-            title="🏓 Pong!",
-            description=f"Latencia: **{latency}ms**",
-            color=discord.Color.green()
-        )
-        await interaction.response.send_message(embed=embed)
+    @commands.command(name="sync")
+    @commands.is_owner() # Solo tú puedes usarlo
+    async def sync(self, ctx):
+        """
+        Sincroniza los comandos slash INSTANTÁNEAMENTE en este servidor.
+        """
+        await ctx.send("🔄 Sincronizando comandos en este servidor...")
+        
+        try:
+            # 1. Copia los comandos globales a este servidor específico
+            self.bot.tree.copy_global_to(guild=ctx.guild)
+            
+            # 2. Sincroniza solo con este servidor (Instantáneo)
+            synced = await self.bot.tree.sync(guild=ctx.guild)
+            
+            logger.info(f"Slash commands sincronizados localmente: {len(synced)}")
+            await ctx.send(f"✅ **¡Éxito!** Sincronizados {len(synced)} comandos. Deberían aparecer YA.")
+        
+        except Exception as e:
+            logger.error(f"Error sincronizando: {e}")
+            await ctx.send(f"❌ Error: {e}")
 
-# --- ESTO ES LO QUE TE FALTA ---
 async def setup(bot):
     await bot.add_cog(Admin(bot))
