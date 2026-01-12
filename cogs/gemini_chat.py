@@ -42,7 +42,38 @@ class IntentAI:
             return json.loads(r.text)
         except:
             return {"intent": "none", "query": None}
+        
+# =========================================================
+# IA DE INVOCACIÓN (¿LE HABLAN AL BOT?)
+# =========================================================
+class CallAI:
+    def __init__(self, model_name, bot_name):
+        self.bot_name = bot_name.lower()
+        self.model = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=(
+                f"decidis si un mensaje esta dirigido al bot llamado '{self.bot_name}'.\n"
+                "respondes SOLO json.\n\n"
+                "true si:\n"
+                "- le hablan directamente\n"
+                "- usan su nombre como invocacion natural\n"
+                "- hay una pregunta o pedido claro\n\n"
+                "false si:\n"
+                "- es solo un saludo\n"
+                "- hablan de el en tercera persona\n"
+                "- charla entre humanos\n\n"
+                "formato:\n"
+                "{ \"called\": false }"
+            )
+        )
 
+    async def is_called(self, text: str) -> bool:
+        try:
+            chat = self.model.start_chat()
+            r = await chat.send_message_async(text)
+            return json.loads(r.text).get("called", False)
+        except:
+            return False
 
 # =========================================================
 # COG PRINCIPAL
