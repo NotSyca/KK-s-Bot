@@ -76,7 +76,7 @@ class GeminiChat(commands.Cog):
         self.key_manager = KeyManager()
         
         # Usamos flash para velocidad y mayor rate limit
-        self.MODEL_NAME = "gemini-1.5-flash"
+        self.MODEL_NAME = "gemini-3-flash-preview"
 
         # --- ESTADO ---
         self.chats = {}           # Sesiones de chat activas
