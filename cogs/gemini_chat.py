@@ -6,11 +6,17 @@ import random
 import json
 from collections import deque
 from datetime import datetime
+import logging
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 
 MEMORY_FILE = "memory.json"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
 
 # =========================================================
@@ -229,7 +235,14 @@ class GeminiChat(commands.Cog):
             self.last_bot_reply[cid] = time.time()
             return res.text
         except ResourceExhausted:
-            print(ResourceExhausted)
+            now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+            logging.warning(
+                f"[GEMINI EXHAUSTED] "
+                f"canal={cid} | "
+                f"mensaje='{text[:120]}'"
+            )
+
             return "me quede sin energia, despues sigo"
 
     # =====================================================
