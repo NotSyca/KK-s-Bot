@@ -14,8 +14,10 @@ class GeminiChat(commands.Cog):
             print("⚠️ GEMINI_API_KEY no encontrada.")
             return
 
-        self.client = genai.Client(api_key=api_key)
-        print("✅ Gemini IA inicializada correctamente.")
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options={"api_version": "v1"}
+)
 
         # Modelo estable para bots
         self.model_name = "gemini-1.5-flash-latest"
