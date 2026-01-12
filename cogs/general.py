@@ -27,48 +27,6 @@ class General(commands.Cog):
             color=discord.Color.green()
         )
         await interaction.response.send_message(embed=embed)
-        
-    @app_commands.command(name="join", description="Hace que el bot entre a tu canal de voz")
-    async def join(self, interaction: discord.Interaction):
-        # 1. Verificar si el usuario que llama al comando está en un canal
-        if not interaction.user.voice or not interaction.user.voice.channel:
-            await interaction.response.send_message("❌ Debes estar en un canal de voz para usar esto.", ephemeral=True)
-            return
-
-        channel = interaction.user.voice.channel
-        
-        # 2. Verificar si el bot ya está conectado en este servidor
-        voice_client = interaction.guild.voice_client
-
-        if voice_client:
-            # Si ya está conectado, verificamos si es el mismo canal
-            if voice_client.channel.id == channel.id:
-                await interaction.response.send_message("ya estoy aquí contigo 👀", ephemeral=True)
-                return
-            else:
-                # Si está en otro canal, lo movemos
-                await voice_client.move_to(channel)
-                await interaction.response.send_message(f"✈️ Me moví a **{channel.name}**")
-        else:
-            # 3. Si no está conectado, conectamos
-            try:
-                await channel.connect()
-                logger.info(f"Conectado al canal de voz: {channel.name} en {interaction.guild.name}")
-                await interaction.response.send_message(f"🔊 Conectado a **{channel.name}**")
-            except Exception as e:
-                logger.error(f"Error al conectar a voz: {e}")
-                await interaction.response.send_message("❌ Ocurrió un error al intentar entrar.", ephemeral=True)
-
-    @app_commands.command(name="leave", description="Saca al bot del canal de voz")
-    async def leave(self, interaction: discord.Interaction):
-        voice_client = interaction.guild.voice_client
-
-        if voice_client:
-            await voice_client.disconnect()
-            await interaction.response.send_message("👋 Desconectado.")
-            logger.info(f"Desconectado de voz en {interaction.guild.name}")
-        else:
-            await interaction.response.send_message("❌ No estoy conectado a ningún canal de voz.", ephemeral=True)
 
 # 3. La función setup va AL FINAL y usa el nombre de la clase de arriba
 async def setup(bot):
