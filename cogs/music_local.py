@@ -3,8 +3,11 @@ from discord.ext import commands
 from discord import app_commands
 import yt_dlp
 import asyncio
+import os
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
-# Configuración de yt-dlp para obtener la mejor calidad de audio posible sin video
+# --- CONFIGURACIÓN ---
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -15,11 +18,10 @@ YTDL_OPTIONS = {
     'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
-    'default_search': 'auto',
-    'source_address': '0.0.0.0', # Bind to ipv4
+    'default_search': 'auto', # CRÍTICO: Permite buscar "Bad Bunny" sin ser link
+    'source_address': '0.0.0.0',
 }
 
-# Configuración de FFmpeg para transmitir a Discord
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn',
@@ -27,72 +29,90 @@ FFMPEG_OPTIONS = {
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
-        self.data = data
-        self.title = data.get('title')
-        self.url = data.get('url')
-
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=True):
-        loop = loop or asyncio.get_event_loop()
-        # Ejecutamos la extracción en un hilo separado para no congelar al bot
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-
-        if 'entries' in data:
-            # Si es una playlist, tomamos el primer item
-            data = data['entries'][0]
-
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
-
 class MusicLocal(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.sp = None
+        
+        # Intentamos cargar Spotify, si falla o no hay claves, no pasa nada
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+        
+        if client_id and client_secret and client_id != "tu_id_aqui":
+            try:
+                self.sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret))
+                print("✅ API de Spotify conectada (Modo Premium).")
+            except Exception:
+                print("⚠️ Credenciales de Spotify inválidas. Usando modo YouTube Puro.")
+        else:
+            print("ℹ️ Modo YouTube Puro activado (Sin Spotify).")
 
-    @app_commands.command(name="play", description="Reproduce música (Modo Local)")
-    @app_commands.describe(busqueda="Nombre o URL de la canción")
+    async def get_spotify_track_info(self, url):
+        if not self.sp: return None
+        try:
+            loop = asyncio.get_event_loop()
+            track = await loop.run_in_executor(None, lambda: self.sp.track(url))
+            return f"{track['artists'][0]['name']} - {track['name']} audio"
+        except:
+            return None
+
+    @app_commands.command(name="play", description="Pon música (Escribe el nombre o link de YouTube)")
+    @app_commands.describe(busqueda="Ej: 'Linkin Park Numb' o URL de YouTube")
     async def play(self, interaction: discord.Interaction, busqueda: str):
-        # 1. Verificar si el usuario está en voz
         if not interaction.user.voice:
-            return await interaction.response.send_message("❌ ¡Entra a un canal de voz primero!", ephemeral=True)
+            return await interaction.response.send_message("❌ Entra a voz primero.", ephemeral=True)
 
         await interaction.response.defer()
 
-        # 2. Conectar al bot si no está conectado
+        # Detección de Spotify (Solo avisamos si intenta usarlo sin tener claves)
+        if "open.spotify.com" in busqueda:
+            if not self.sp:
+                return await interaction.followup.send("⚠️ Spotify está bloqueado temporalmente por su API. \n👉 **Solución:** Escribe el nombre de la canción en lugar del link. Ej: `/play busqueda: Bad Bunny Monaco`")
+            
+            # Si tuviera claves (en el futuro), hace esto:
+            nuevo_termino = await self.get_spotify_track_info(busqueda)
+            if nuevo_termino: busqueda = nuevo_termino
+
+        # Conectar a voz
         if not interaction.guild.voice_client:
             try:
-                await interaction.user.voice.channel.connect()
-            except Exception as e:
-                return await interaction.followup.send("❌ No pude conectarme al canal.")
-        
-        vc = interaction.guild.voice_client
+                vc = await interaction.user.voice.channel.connect()
+            except:
+                return await interaction.followup.send("❌ Error al conectar al canal.")
+        else:
+            vc = interaction.guild.voice_client
 
-        # 3. Detener si ya hay algo sonando (Este sistema simple no tiene cola compleja)
         if vc.is_playing():
             vc.stop()
 
+        # Buscar y Reproducir
         try:
-            # 4. Obtener el stream
-            player = await YTDLSource.from_url(busqueda, loop=self.bot.loop, stream=True)
+            loop = self.bot.loop
+            # La magia está aquí: 'busqueda' puede ser un Link O un Nombre
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(busqueda, download=False))
+
+            if 'entries' in data:
+                data = data['entries'][0]
+
+            filename = data['url']
+            title = data.get('title', 'Canción desconocida')
             
-            # 5. Reproducir
-            vc.play(player, after=lambda e: print(f'Error de reproducción: {e}') if e else None)
+            source = discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS)
+            vc.play(discord.PCMVolumeTransformer(source, volume=0.5))
             
-            await interaction.followup.send(f'▶️ Reproduciendo: **{player.title}**')
+            await interaction.followup.send(f'▶️ Reproduciendo: **{title}**')
             
         except Exception as e:
-            await interaction.followup.send(f"❌ Error al buscar/reproducir: `{e}`")
+            print(f"Error: {e}") # Log consola
+            await interaction.followup.send("❌ No encontré la canción o hubo un error de conexión.")
 
-    @app_commands.command(name="stop", description="Detiene la música y saca al bot")
+    @app_commands.command(name="stop", description="Detiene la música")
     async def stop(self, interaction: discord.Interaction):
-        vc = interaction.guild.voice_client
-        if vc:
-            await vc.disconnect()
-            await interaction.response.send_message("🛑 Desconectado.")
+        if interaction.guild.voice_client:
+            await interaction.guild.voice_client.disconnect()
+            await interaction.response.send_message("🛑 Bot desconectado.")
         else:
-            await interaction.response.send_message("❌ No estoy en un canal.", ephemeral=True)
+            await interaction.response.send_message("❌ No estoy conectado.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(MusicLocal(bot))
