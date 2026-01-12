@@ -22,9 +22,7 @@ class Bot(commands.Bot):
                 extension_name = f'cogs.{filename[:-3]}'
                 try:
                     await self.load_extension(extension_name)
-                    print(f'✅ Cog cargado: {extension_name}')
                 except Exception as e:
-                    # Logueamos el error pero el bot sigue encendiendo
                     print(f'❌ Error cargando {extension_name}: {e}')
 
         await self.tree.sync()
