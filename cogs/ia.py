@@ -20,7 +20,7 @@ class GeminiChat(commands.Cog):
 )
 
         # Modelo estable para bots
-        self.model_name = "gemini-1.5-flash-latest"
+        self.model_name = "gemini-3-flash"
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
