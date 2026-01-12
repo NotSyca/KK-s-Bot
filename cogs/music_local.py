@@ -47,7 +47,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         filename = data['url'] if stream else ytdl.prepare_filename(data)
         return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
 
-class music(commands.Cog):
+class MusicLocal(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -95,4 +95,4 @@ class music(commands.Cog):
             await interaction.response.send_message("❌ No estoy en un canal.", ephemeral=True)
 
 async def setup(bot):
-    await bot.add_cog(music(bot))
+    await bot.add_cog(MusicLocal(bot))
