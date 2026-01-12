@@ -94,7 +94,7 @@ class GeminiChat(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.key_manager = KeyManager()
-        self.MODEL_NAME = "gemini-1.5-flash"
+        self.MODEL_NAME = "gemini-3-flash-preview"
 
         self.chats = {}
         self.histories = {}
