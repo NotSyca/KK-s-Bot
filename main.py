@@ -19,12 +19,14 @@ class Bot(commands.Bot):
         # Carga extensiones de la carpeta cogs
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py'):
-                await self.load_extension(f'cogs.{filename[:-3]}')
-                print(f"⚙️  Cog cargado: {filename[:-3]}")
-        
-        # Sincroniza comandos slash con Discord
-        # OJO: Hacer sync global cada vez puede dar rate-limit. 
-        # Úsalo con cuidado o sincroniza a un servidor específico.
+                extension_name = f'cogs.{filename[:-3]}'
+                try:
+                    await self.load_extension(extension_name)
+                    print(f'✅ Cog cargado: {extension_name}')
+                except Exception as e:
+                    # Logueamos el error pero el bot sigue encendiendo
+                    print(f'❌ Error cargando {extension_name}: {e}')
+
         await self.tree.sync()
         print("🌲 Slash commands sincronizados")
 
