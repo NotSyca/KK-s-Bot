@@ -1,125 +1,123 @@
 import discord
 from discord.ext import commands
-import google.generativeai as genai
 import os
-import datetime
+import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
+from collections import deque
+import time
 import asyncio
-
-# Configuración inicial de la API de Google Gemini
-# Asegúrate de tener la variable de entorno cargada antes de iniciar el bot.
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 class GeminiChat(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         
-        # Diccionario de Estado (Persistencia en Memoria)
-        # Clave: ID del canal (int)
-        # Valor: Timestamp del último mensaje (datetime)
-        self.active_channels = {}
+        # Configuración de Google AI
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            print("ERROR: GOOGLE_API_KEY no encontrada en variables de entorno.")
         
-        # Configuración del Timeout (5 minutos)
-        self.timeout_delta = datetime.timedelta(minutes=5)
-
+        genai.configure(api_key=api_key)
+        
         # Configuración del Modelo
-        # Usamos system_instruction para definir la personalidad
-        system_instruction = (
-            "Eres un participante más en la conversación. Hablas de forma natural, "
-            "fluida y coherente con el contexto de la mesa. IMPORTANTE: Actúa como "
-            "un participante más en la mesa, no como un asistente formal. "
-            "No uses saludos robóticos ni te ofrezcas a ayudar a menos que encaje en la charla."
+        self.model_name = 'gemini-1.5-flash'
+        self.system_instruction = (
+            "sos un participante mas del chat. hablas normal, sin usar signos de apertura como ¡ o ¿. "
+            "escribis de forma corta y casual, como un amigo mas. no sos un asistente. "
+            "usa minúsculas casi siempre. si el mensaje es corto, responde corto. "
+            "sé sarcástico si la situación lo amerita, pero relajado."
         )
         
         self.model = genai.GenerativeModel(
-            model_name='gemini-3-flash-preview', # Modelo solicitado
-            system_instruction=system_instruction
+            model_name=self.model_name,
+            system_instruction=self.system_instruction
         )
 
-    def _check_timeout(self, channel_id):
-        """
-        Lógica de Timeout:
-        Verifica si ha pasado más tiempo del permitido desde el último mensaje.
-        Si es así, elimina el canal de la lista activa.
-        Retorna True si el canal sigue activo, False si expiró.
-        """
-        if channel_id not in self.active_channels:
-            return False
-            
-        last_active = self.active_channels[channel_id]
-        now = datetime.datetime.now(datetime.timezone.utc)
+        # Gestión de estado
+        # active_sessions: { channel_id: timestamp_ultimo_mensaje }
+        self.active_sessions = {} 
+        # histories: { channel_id: deque(maxlen=12) } -> Historial de mensajes de chat de Gemini
+        self.histories = {}
         
-        # Si la diferencia entre AHORA y la ÚLTIMA VEZ es mayor al TIMEOUT
-        if (now - last_active) > self.timeout_delta:
-            del self.active_channels[channel_id] # Eliminar del estado activo
-            return False
-            
-        return True
+        # Tiempo de espera (5 minutos en segundos)
+        self.TIMEOUT_SECONDS = 300 
 
-    async def _generate_reply(self, message, history_messages):
-        """Genera la respuesta usando el historial como contexto."""
-        chat_context = ""
+    def _update_session(self, channel_id):
+        """Actualiza el tiempo de la sesión y la mantiene viva."""
+        self.active_sessions[channel_id] = time.time()
+
+    def _get_history(self, channel_id):
+        """Obtiene o crea el historial para un canal."""
+        if channel_id not in self.histories:
+            self.histories[channel_id] = deque(maxlen=12) # Historial limitado a 12 turnos
+        return self.histories[channel_id]
+
+    async def _generate_response(self, channel_id, user_text):
+        """Envía el mensaje a Gemini manteniendo el contexto."""
+        history_deque = self._get_history(channel_id)
         
-        # Construcción del contexto basada en el historial
-        for msg in history_messages:
-            author_name = msg.author.display_name
-            content = msg.clean_content
-            chat_context += f"{author_name}: {content}\n"
-            
-        # Añadir el mensaje actual si no está en el historial aún (depende de latencia)
-        if history_messages and history_messages[-1].id != message.id:
-             chat_context += f"{message.author.display_name}: {message.clean_content}\n"
-
+        # Convertimos el deque a lista para la API
+        chat_history = list(history_deque)
+        
+        chat = self.model.start_chat(history=chat_history)
+        
         try:
-            # Enviamos el contexto crudo para que el modelo entienda el flujo
-            response = await self.model.generate_content_async(chat_context)
+            # Enviamos mensaje de forma asíncrona para no bloquear el bot
+            response = await chat.send_message_async(user_text)
+            
+            # Guardamos el turno en nuestro historial local
+            # La API de chat guarda el historial internamente en la sesión 'chat', 
+            # pero como recreamos start_chat para persistencia entre reinicios de función,
+            # actualizamos nuestro deque manual.
+            history_deque.append({"role": "user", "parts": [user_text]})
+            history_deque.append({"role": "model", "parts": [response.text]})
+            
             return response.text
+            
+        except ResourceExhausted:
+            # Manejo específico del Free Tier
+            return "che, me canse de hablar por ahora jaja, denme un toque y vuelvo en un rato"
         except Exception as e:
             print(f"Error en Gemini API: {e}")
-            return None
+            return "uy, se me tildó el cerebro, proba de nuevo."
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        # 1. Ignorar mensajes del propio bot o de otros bots
-        if message.author.bot:
+        # Ignorar mensajes del propio bot
+        if message.author == self.bot.user:
             return
 
         channel_id = message.channel.id
-        now = datetime.datetime.now(datetime.timezone.utc)
-        
-        # Verificar si el bot fue mencionado directamente
         is_mentioned = self.bot.user in message.mentions
+        is_active = False
 
-        # Verificar estado del canal (si estaba activo previamente)
-        is_active_channel = self._check_timeout(channel_id)
-
-        # Lógica de Activación y Participación
-        should_reply = False
-
-        if is_mentioned:
-            # Si lo mencionan, se activa o reactiva el canal inmediatamente
-            self.active_channels[channel_id] = now
-            should_reply = True
-        elif is_active_channel:
-            # Si el canal está activo y no ha expirado, responde a CUALQUIER mensaje
-            # Actualizamos el timestamp para mantener la conversación viva
-            self.active_channels[channel_id] = now
-            should_reply = True
-
-        if should_reply:
+        # Lógica de activación y expiración
+        if channel_id in self.active_sessions:
+            last_active = self.active_sessions[channel_id]
+            if time.time() - last_active < self.TIMEOUT_SECONDS:
+                is_active = True
+            else:
+                # Expiró la sesión, limpiamos
+                del self.active_sessions[channel_id]
+                if channel_id in self.histories:
+                    del self.histories[channel_id]
+        
+        # Decidir si responder
+        if is_mentioned or is_active:
+            # Indicar que está escribiendo (typing)
             async with message.channel.typing():
-                # Lógica de Contexto: Obtener los últimos 15 mensajes
-                # history devuelve del más nuevo al más viejo, por lo que usamos reversed
-                history = [msg async for msg in message.channel.history(limit=15, before=datetime.datetime.now())]
-                history_reversed = list(reversed(history))
+                # Limpiamos el contenido del mensaje (quitamos la mención para que no la lea la IA)
+                clean_content = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
+                
+                if not clean_content and is_mentioned:
+                    clean_content = "hola" # Si solo lo mencionan sin texto
 
-                response_text = await self._generate_reply(message, history_reversed)
-
-                if response_text:
-                    # Discord tiene un límite de 2000 caracteres, cortamos si es necesario
-                    if len(response_text) > 2000:
-                        response_text = response_text[:1997] + "..."
-                    
-                    await message.reply(response_text, mention_author=False)
+                response_text = await self._generate_response(channel_id, clean_content)
+                
+                # Actualizar tiempo de sesión
+                self._update_session(channel_id)
+                
+                # Enviar respuesta
+                await message.channel.send(response_text)
 
 async def setup(bot):
     await bot.add_cog(GeminiChat(bot))
