@@ -5,7 +5,7 @@ import yt_dlp
 import asyncio
 import os
 import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+#from spotipy.oauth2 import SpotifyClientCredentials
 
 # --- CONFIGURACIÓN ---
 YTDL_OPTIONS = {
