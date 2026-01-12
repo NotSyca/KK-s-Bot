@@ -218,7 +218,7 @@ class GeminiChat(commands.Cog):
                 if q:
                     await message.channel.send(f"va, pongo `{q}`")
                     # VERIFICA QUE play_query EXISTA EN TU MUSIC BOT
-                    if hasattr(music_cog, 'play_query'):
+                    if hasattr(music_cog, "play"):
                         await music_cog.play_query(message, q)
                     else:
                         logger.error("❌ [METHOD-ERROR] 'MusicCog' no tiene método 'play_query'.")
@@ -227,19 +227,19 @@ class GeminiChat(commands.Cog):
                     await message.channel.send("que pongo? no entendí la canción")
 
             elif i == "skip_music":
-                if hasattr(music_cog, 'skip'): await music_cog.skip(message)
+                if hasattr(music_cog, "skip"): await music_cog.skip(message)
                 else: logger.error("❌ MusicCog sin metodo skip")
 
             elif i == "stop_music":
-                if hasattr(music_cog, 'stop'): await music_cog.stop(message)
+                if hasattr(music_cog, "stop"): await music_cog.stop(message)
                 else: logger.error("❌ MusicCog sin metodo stop")
 
             elif i == "join_voice":
-                if hasattr(music_cog, 'join'): await music_cog.join(message)
+                if hasattr(music_cog, "join"): await music_cog.join(message)
                 else: logger.error("❌ MusicCog sin metodo join")
 
             elif i == "leave_voice":
-                if hasattr(music_cog, 'leave'): await music_cog.leave(message)
+                if hasattr(music_cog, "leave"): await music_cog.leave(message)
                 else: logger.error("❌ MusicCog sin metodo leave")
             
             logger.info("✅ [ACTION-SUCCESS] Comando ejecutado correctamente.")
