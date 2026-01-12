@@ -14,7 +14,7 @@ class Music(commands.Cog):
         # Para desarrollo usaremos uno público de "Lavalink List".
         nodes = [
             wavelink.Node(
-                uri="https://lavalink.devamop.in:443", # Nodo público (ejemplo)
+                uri="http://lavalink.devamop.in:443",
                 password="DevamOP"
             )
         ]
