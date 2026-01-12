@@ -10,64 +10,72 @@ class GeminiChat(commands.Cog):
         api_key = os.getenv("GEMINI_API_KEY")
         
         if api_key:
-            # Instanciamos el cliente nuevo
-            # http_options={'api_version': 'v1alpha'} a veces es necesario para modelos muy nuevos, 
-            # pero para 1.5-flash el cliente default va bien.
+            # Inicializamos cliente
             self.client = genai.Client(api_key=api_key)
-            print("✅ IA Gemini (Nueva GenAI SDK) conectada.")
+            print("✅ IA Gemini (SDK Moderno) cargada.")
         else:
             self.client = None
             print("⚠️ Falta GEMINI_API_KEY.")
 
+    @commands.command(name="debug_ai", hidden=True)
+    async def debug_ai(self, ctx):
+        """Comando para ver qué modelos están disponibles realmente"""
+        if not self.client: return await ctx.send("Sin API Key.")
+        
+        await ctx.send("🔍 Consultando modelos disponibles en Google...")
+        try:
+            # Listamos modelos que soporten generación de contenido
+            models_list = ""
+            async for model in self.client.aio.models.list(config={"page_size": 10}):
+                if "generateContent" in model.supported_generation_methods:
+                    models_list += f"`{model.name}`\n"
+            
+            # Cortamos si es muy largo
+            if len(models_list) > 1900: models_list = models_list[:1900]
+            await ctx.send(f"**Modelos Disponibles:**\n{models_list}")
+        except Exception as e:
+            await ctx.send(f"❌ Error al listar modelos: {e}")
+
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.author.bot or not self.client:
-            return
+        if message.author.bot or not self.client: return
 
-        # Detectar mención o respuesta
-        is_mentioned = self.bot.user in message.mentions
-        is_reply = (message.reference and message.reference.resolved and 
-                    message.reference.resolved.author == self.bot.user)
-
-        if is_mentioned or is_reply:
+        # Detectar mención
+        if self.bot.user in message.mentions or (message.reference and message.reference.resolved and message.reference.resolved.author == self.bot.user):
+            
             async with message.channel.typing():
                 try:
-                    # 1. Preparar Historial
-                    history = [msg async for msg in message.channel.history(limit=15)]
+                    history = [msg async for msg in message.channel.history(limit=10)]
                     history.reverse()
 
-                    # Convertimos el chat a texto plano para evitar errores de estructura
-                    chat_log = "Historial reciente del chat:\n"
+                    chat_log = "Historial:\n"
                     for msg in history:
-                        author = msg.author.display_name.replace(":", "")
-                        content = msg.clean_content
-                        chat_log += f"{author}: {content}\n"
+                        name = msg.author.display_name.replace(":", "")
+                        chat_log += f"{name}: {msg.clean_content}\n"
                     
-                    chat_log += "\nInstrucción: Eres 'Bot', un asistente sarcástico de Discord. Responde al último mensaje."
+                    chat_log += "\nInstrucción: Responde como un Bot de Discord útil."
 
-                    # 2. Llamada a la API (ASÍNCRONA con .aio)
-                    # Usamos el modelo 'gemini-1.5-flash' que es el estándar rápido actual
+                    # INTENTO 1: Usar la versión estable específica
+                    model_to_use = "gemini-1.5-flash" 
+                    
                     response = await self.client.aio.models.generate_content(
-                        model='gemini-1.5-flash',
+                        model=model_to_use,
                         contents=chat_log,
                         config=types.GenerateContentConfig(
-                            max_output_tokens=400,
+                            max_output_tokens=500,
                             temperature=0.7
                         )
                     )
-
-                    reply_text = response.text
-
-                    # 3. Enviar
-                    if len(reply_text) > 2000:
-                        reply_text = reply_text[:1990] + "..."
                     
-                    await message.reply(reply_text)
+                    await message.reply(response.text[:1999])
 
                 except Exception as e:
                     print(f"❌ Error Gemini: {e}")
-                    # Feedback visual si falla
-                    await message.add_reaction("⚠️")
+                    # Si falla el flash, intentamos con el modelo Pro como fallback
+                    if "404" in str(e):
+                        await message.reply("❌ Error 404: El modelo `gemini-1.5-flash` no responde. Usa `!debug_ai` para ver cuáles funcionan.")
+                    else:
+                        await message.reply("😵 Me dio un error interno.")
 
 async def setup(bot):
     await bot.add_cog(GeminiChat(bot))
