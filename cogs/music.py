@@ -14,9 +14,9 @@ class Music(commands.Cog):
         # Para desarrollo usaremos uno público de "Lavalink List".
         nodes = [
             wavelink.Node(
-                uri="http://node.raidenbot.xyz:5500",  # Nota: http y puerto 5500
-                password="pwd"
-            )
+        uri="http://lavalink.kulich.eu:2333", # Nota: http y puerto 2333
+        password="kulisdev"
+    )
         ]
         # Conectamos Wavelink al iniciar el Cog
         await wavelink.Pool.connect(nodes=nodes, client=self.bot, cache_capacity=100)
