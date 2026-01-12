@@ -1,120 +1,98 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import wavelink
-import typing
+import yt_dlp
+import asyncio
 
-class Music(commands.Cog):
+# Configuración de yt-dlp para obtener la mejor calidad de audio posible sin video
+YTDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0', # Bind to ipv4
+}
+
+# Configuración de FFmpeg para transmitir a Discord
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn',
+}
+
+ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.data = data
+        self.title = data.get('title')
+        self.url = data.get('url')
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=True):
+        loop = loop or asyncio.get_event_loop()
+        # Ejecutamos la extracción en un hilo separado para no congelar al bot
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
+        if 'entries' in data:
+            # Si es una playlist, tomamos el primer item
+            data = data['entries'][0]
+
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
+
+class MusicLocal(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def cog_load(self):
-        # Configuración del Nodo Lavalink.
-        # NOTA: Los nodos públicos mueren a veces. Lo ideal es hostear tu propio Lavalink.
-        # Para desarrollo usaremos uno público de "Lavalink List".
-        nodes = [
-            wavelink.Node(
-        uri="http://lavalink.karing.my.id:80", # Nota: http y puerto 2333
-        password="karing"
-    )
-        ]
-        # Conectamos Wavelink al iniciar el Cog
-        await wavelink.Pool.connect(nodes=nodes, client=self.bot, cache_capacity=100)
-        print("✅ Sistema de música (Wavelink) conectado.")
-
-    @commands.Cog.listener()
-    async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload):
-        print(f"🎵 Nodo Lavalink listo: {payload.node.identifier}")
-
-    # --- COMANDOS ---
-
-    @app_commands.command(name="play", description="Reproduce música de YouTube/SoundCloud/Spotify")
-    @app_commands.describe(busqueda="URL o nombre de la canción")
+    @app_commands.command(name="play", description="Reproduce música (Modo Local)")
+    @app_commands.describe(busqueda="Nombre o URL de la canción")
     async def play(self, interaction: discord.Interaction, busqueda: str):
+        # 1. Verificar si el usuario está en voz
         if not interaction.user.voice:
-            return await interaction.response.send_message("❌ Entra a un canal de voz primero.", ephemeral=True)
+            return await interaction.response.send_message("❌ ¡Entra a un canal de voz primero!", ephemeral=True)
 
-        await interaction.response.defer() # Evita timeout si tarda en buscar
+        await interaction.response.defer()
 
-        # Buscar la canción
-        tracks = await wavelink.Playable.search(busqueda)
-        if not tracks:
-            return await interaction.followup.send("❌ No encontré nada con ese nombre.")
-        
-        track = tracks[0] # Tomamos el primer resultado
-
-        # Conectar al canal si no está conectado
+        # 2. Conectar al bot si no está conectado
         if not interaction.guild.voice_client:
-            vc: wavelink.Player = await interaction.user.voice.channel.connect(cls=wavelink.Player)
-        else:
-            vc: wavelink.Player = interaction.guild.voice_client
-
-        # Añadir a la cola y reproducir
-        await vc.queue.put_wait(track)
+            try:
+                await interaction.user.voice.channel.connect()
+            except Exception as e:
+                return await interaction.followup.send("❌ No pude conectarme al canal.")
         
-        if not vc.playing:
-            await vc.play(vc.queue.get())
-            await interaction.followup.send(f"▶️ Reproduciendo: **{track.title}**")
-        else:
-            await interaction.followup.send(f"d📝 Añadido a la cola: **{track.title}**")
+        vc = interaction.guild.voice_client
 
-    @app_commands.command(name="skip", description="Salta la canción actual")
-    async def skip(self, interaction: discord.Interaction):
-        vc: wavelink.Player = interaction.guild.voice_client
-        if not vc or not vc.playing:
-            return await interaction.response.send_message("❌ No hay nada sonando.", ephemeral=True)
-        
-        await vc.skip(force=True)
-        await interaction.response.send_message("⏭️ Canción saltada.")
+        # 3. Detener si ya hay algo sonando (Este sistema simple no tiene cola compleja)
+        if vc.is_playing():
+            vc.stop()
 
-    @app_commands.command(name="stop", description="Detiene la música y desconecta")
+        try:
+            # 4. Obtener el stream
+            player = await YTDLSource.from_url(busqueda, loop=self.bot.loop, stream=True)
+            
+            # 5. Reproducir
+            vc.play(player, after=lambda e: print(f'Error de reproducción: {e}') if e else None)
+            
+            await interaction.followup.send(f'▶️ Reproduciendo: **{player.title}**')
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error al buscar/reproducir: `{e}`")
+
+    @app_commands.command(name="stop", description="Detiene la música y saca al bot")
     async def stop(self, interaction: discord.Interaction):
-        vc: wavelink.Player = interaction.guild.voice_client
+        vc = interaction.guild.voice_client
         if vc:
             await vc.disconnect()
             await interaction.response.send_message("🛑 Desconectado.")
         else:
-            await interaction.response.send_message("❌ No estoy conectado.", ephemeral=True)
-
-    @app_commands.command(name="volumen", description="Cambia el volumen (0-100)")
-    async def volumen(self, interaction: discord.Interaction, valor: int):
-        vc: wavelink.Player = interaction.guild.voice_client
-        if not vc: return await interaction.response.send_message("❌ No estoy conectado.", ephemeral=True)
-        
-        valor = max(0, min(100, valor)) # Limitar entre 0 y 100
-        await vc.set_volume(valor)
-        await interaction.response.send_message(f"🔊 Volumen ajustado a **{valor}%**")
-
-    # --- FEATURE PREMIUM: FILTROS ---
-    @app_commands.command(name="filtro", description="Aplica filtros de audio (Bassboost, Nightcore)")
-    @app_commands.choices(tipo=[
-        app_commands.Choice(name="Ninguno", value="none"),
-        app_commands.Choice(name="Bassboost (Bajo fuerte)", value="bass"),
-        app_commands.Choice(name="Nightcore (Rápido/Agudo)", value="night")
-    ])
-    async def filtro(self, interaction: discord.Interaction, tipo: app_commands.Choice[str]):
-        vc: wavelink.Player = interaction.guild.voice_client
-        if not vc: return await interaction.response.send_message("❌ No estoy conectado.", ephemeral=True)
-
-        filters: wavelink.Filters = vc.filters
-
-        if tipo.value == "bass":
-            # Ecualizador para resaltar bajos
-            filters.equalizer.set(bands=[
-                {"band": 0, "gain": 0.25},
-                {"band": 1, "gain": 0.25},
-                {"band": 2, "gain": 0.25}
-            ])
-            filters.timescale.reset() # Resetear velocidad
-        elif tipo.value == "night":
-            # Aumentar velocidad y pitch
-            filters.timescale.set(pitch=1.2, speed=1.2, rate=1.0)
-            filters.equalizer.reset()
-        else:
-            filters.reset()
-
-        await vc.set_filters(filters)
-        await interaction.response.send_message(f"🎚️ Filtro aplicado: **{tipo.name}**")
+            await interaction.response.send_message("❌ No estoy en un canal.", ephemeral=True)
 
 async def setup(bot):
-    await bot.add_cog(Music(bot))
+    await bot.add_cog(MusicLocal(bot))
