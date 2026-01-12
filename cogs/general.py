@@ -19,7 +19,7 @@ class General(commands.Cog):
     @app_commands.command(name="ping", description="Ver la latencia del bot")
     async def ping(self, interaction: discord.Interaction):
         latency = round(self.bot.latency * 1000)
-        logger.addHandler(f"Comando /ping usado por {interaction.user}")
+        print(f"Comando /ping usado por {interaction.user}")
         
         embed = discord.Embed(
             title="🏓 Pong!",
@@ -27,6 +27,7 @@ class General(commands.Cog):
             color=discord.Color.green()
         )
         await interaction.response.send_message(embed=embed)
+
 
 # 3. La función setup va AL FINAL y usa el nombre de la clase de arriba
 async def setup(bot):
