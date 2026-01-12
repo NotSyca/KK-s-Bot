@@ -135,7 +135,7 @@ class GeminiChat(commands.Cog):
         
         # 2. Configuración del Modelo
         # Usamos flash por velocidad y costo. Cambia a "gemini-pro" si prefieres calidad.
-        self.MODEL_NAME = "gemini-1.5-flash" 
+        self.MODEL_NAME = "gemini-3-flash-preview" 
 
         # 3. Estado en Memoria Volátil
         self.chats = {}           # Objetos ChatSession activos por canal
