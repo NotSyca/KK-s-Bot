@@ -219,7 +219,7 @@ class GeminiChat(commands.Cog):
                     await message.channel.send(f"va, pongo `{q}`")
                     # VERIFICA QUE play_query EXISTA EN TU MUSIC BOT
                     if hasattr(music_cog, "play"):
-                        await music_cog.play(message, q)
+                        await music_cog.play_query(message, q)
                     else:
                         logger.error("❌ [METHOD-ERROR] 'MusicCog' no tiene método 'play_query'.")
                         await message.channel.send("error interno: no sé como poner musica (metodo incorrecto)")
