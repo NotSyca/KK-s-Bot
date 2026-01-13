@@ -37,7 +37,7 @@ class ServerQueue:
         self.current_track = None # La canción sonando ahora
         self.volume = 0.5 # Volumen por defecto (50%)
 
-class MusicLocal(commands.Cog):
+class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.queues = {} # Diccionario para guardar las colas de cada servidor {guild_id: ServerQueue}
@@ -312,4 +312,4 @@ class MusicLocal(commands.Cog):
         await self.stop(message)
 
 async def setup(bot):
-    await bot.add_cog(MusicLocal(bot))
+    await bot.add_cog(MusicCog(bot))
