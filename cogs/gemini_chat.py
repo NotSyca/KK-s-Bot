@@ -30,7 +30,7 @@ MEMORY_FILE = "memory.json"
 # =========================================================
 class KeyManager:
     def __init__(self):
-        raw_keys = [os.getenv("GOOGLE_API_KEY"), os.getenv("GOOGLE_API_KEY_2")]
+        raw_keys = [os.getenv("GOOGLE_API_KEY"), os.getenv("GOOGLE_API_KEY_2"), os.getenv("GOOGLE_API_KEY_3")]
         self.keys = [k for k in raw_keys if k]
         
         if not self.keys:
