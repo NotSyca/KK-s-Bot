@@ -108,7 +108,7 @@ class MusicLocal(commands.Cog):
             # Opcional: Desconectar automáticamente tras un tiempo
             # asyncio.run_coroutine_threadsafe(vc.disconnect(), self.bot.loop)
 
-    # --- COMANDOS ---
+    # --- COMANDOS INTERACTIVOS ---
 
     @app_commands.command(name="play", description="Añade una canción a la cola")
     @app_commands.describe(busqueda="Link de YouTube/Spotify o nombre de la canción")
@@ -233,6 +233,83 @@ class MusicLocal(commands.Cog):
             await interaction.response.send_message("🛑 **Desconectado y cola borrada.**")
         else:
             await interaction.response.send_message("❌ No estoy conectado.", ephemeral=True)
+
+# =========================================================
+    # COMANDOS CON PREFIX (!play, !skip)
+    # =========================================================
+    @commands.command(name="play", aliases=["p"])
+    async def play(self, ctx, *, query: str):
+        """Comando para humanos: !play despacito"""
+        await self._add_to_queue_logic(ctx, query)
+
+    @commands.command(name="skip", aliases=["s", "next"])
+    async def skip(self, ctx):
+        """Salta la canción actual"""
+        vc = ctx.guild.voice_client
+        if vc and vc.is_playing():
+            vc.stop() # Esto dispara el 'after' de _play_next
+            await ctx.send("⏭️ **Saltada.**")
+        else:
+            await ctx.send("❌ No hay nada sonando.")
+
+    @commands.command(name="stop", aliases=["leave", "disconnect"])
+    async def stop(self, ctx):
+        """Desconecta al bot y borra la cola"""
+        vc = ctx.guild.voice_client
+        if vc:
+            # Limpiar cola
+            if ctx.guild.id in self.queues:
+                self.queues[ctx.guild.id] = []
+            await vc.disconnect()
+            await ctx.send("👋 **Adiós.**")
+        else:
+            await ctx.send("❌ No estoy conectado.")
+
+    @commands.command(name="join")
+    async def join(self, ctx):
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+            await ctx.send("👍 **Conectado.**")
+        else:
+            await ctx.send("❌ Entra a un canal primero.")
+
+    # =========================================================
+    # PUENTE PARA GEMINI (IA)
+    # =========================================================
+    # La IA llama a estas funciones exactas.
+    # Reutilizamos la lógica de arriba pasando el objeto 'message'.
+
+    async def play_query(self, message, query):
+        """Gemini llama a esto. Reutilizamos la lógica de !play"""
+        await self._add_to_queue_logic(message, query)
+
+    async def skip(self, message):
+        """Gemini llama a esto."""
+        # Simulamos un contexto o actuamos directo
+        vc = message.guild.voice_client
+        if vc and vc.is_playing():
+            vc.stop()
+            await message.channel.send("⏭️ (Saltado por IA)")
+
+    async def stop(self, message):
+        """Gemini llama a esto."""
+        vc = message.guild.voice_client
+        if vc:
+            self.queues[message.guild.id] = []
+            await vc.disconnect()
+            await message.channel.send("👋 (Desconectado por IA)")
+
+    async def join(self, message):
+        """Gemini llama a esto."""
+        if message.author.voice:
+            await message.author.voice.channel.connect()
+            await message.channel.send("👍")
+        else:
+            await message.channel.send("entra a un canal vos primero")
+    
+    async def leave(self, message):
+        """Alias para stop usado por Gemini"""
+        await self.stop(message)
 
 async def setup(bot):
     await bot.add_cog(MusicLocal(bot))
