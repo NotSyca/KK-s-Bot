@@ -7,15 +7,14 @@ import json
 from collections import deque
 from datetime import datetime
 import logging
-import traceback  # IMPORTANTE: Para ver el error real si explota
+import traceback
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted, GoogleAPICallError
 
 # =========================================================
-# CONFIGURACIÓN DE LOGS (NIVEL DEBUG)
+# CONFIGURACIÓN DE LOGS
 # =========================================================
-# Esto hará que la consola se llene de info útil
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -30,7 +29,12 @@ MEMORY_FILE = "memory.json"
 # =========================================================
 class KeyManager:
     def __init__(self):
-        raw_keys = [os.getenv("GOOGLE_API_KEY"), os.getenv("GOOGLE_API_KEY_2"), os.getenv("GOOGLE_API_KEY_3")]
+        # AÑADE AQUÍ TODAS LAS KEYS QUE TENGAS
+        raw_keys = [
+            os.getenv("GOOGLE_API_KEY"), 
+            os.getenv("GOOGLE_API_KEY_2"), 
+            os.getenv("GOOGLE_API_KEY_3")
+        ]
         self.keys = [k for k in raw_keys if k]
         
         if not self.keys:
@@ -39,56 +43,40 @@ class KeyManager:
             logger.info(f"✅ KeyManager cargado con {len(self.keys)} llaves.")
         
         self.current_index = 0
-        # Configuramos la primera por defecto, pero se validará en on_ready
         if self.keys:
             self._configure()
 
     def _configure(self):
-        """Aplica la configuración de la key actual."""
         key = self.keys[self.current_index]
         genai.configure(api_key=key)
         logger.info(f"🔑 [CONFIG] Key activa: Índice {self.current_index} (***{key[-4:]})")
 
     def rotate(self):
-        """Pasa a la siguiente key disponible."""
         if not self.keys: return
-        
         logger.warning(f"🔄 [ROTACION] Cambiando de Key {self.current_index} a la siguiente...")
         self.current_index = (self.current_index + 1) % len(self.keys)
         self._configure()
 
     async def find_working_key(self, model_name):
-        """
-        Prueba las keys una por una al inicio.
-        Se queda con la primera que funcione.
-        """
         if not self.keys: return False
-
         logger.info("🔎 [STARTUP] Buscando una API Key funcional...")
         
-        # Probamos tantas veces como keys tengamos
         for _ in range(len(self.keys)):
             try:
-                # Prueba ligera: Generar un token
                 model = genai.GenerativeModel(model_name)
-                # Petición mínima para gastar lo menos posible pero validar estado
                 await model.generate_content_async("ping")
-                
-                logger.info(f"✅ [STARTUP] La Key #{self.current_index} está operativa. Se usará esta.")
+                logger.info(f"✅ [STARTUP] La Key #{self.current_index} está operativa.")
                 return True
-                
             except ResourceExhausted:
-                logger.warning(f"⚠️ [STARTUP] Key #{self.current_index} agotada/limitada. Probando siguiente...")
                 self.rotate()
             except Exception as e:
-                logger.error(f"❌ [STARTUP] Key #{self.current_index} error: {e}. Probando siguiente...")
                 self.rotate()
 
         logger.critical("⛔ [STARTUP] TODAS LAS KEYS ESTÁN AGOTADAS O ROTAS.")
         return False
 
 # =========================================================
-# IA DE INTENCIÓN (CON LOGS DE RESPUESTA RAW)
+# IA DE INTENCIÓN
 # =========================================================
 class IntentAI:
     def __init__(self, model_name):
@@ -101,12 +89,14 @@ class IntentAI:
             system_instruction=(
                 "detectas intenciones en mensajes de discord.\n"
                 "respondes SOLO json valido.\n"
+                "ignora nombres de usuario al principio del mensaje (ej 'Juan: pon musica').\n"
                 "intenciones: play_music (query), skip_music, stop_music, join_voice, leave_voice, none\n"
                 "formato: { \"intent\": \"none\", \"query\": null }"
             )
         )
 
     async def detect(self, text: str) -> dict:
+        # Generación rápida sin historial
         r = await self.model.generate_content_async(text)
         clean = r.text.replace("```json", "").replace("```", "").strip()
         try:
@@ -131,7 +121,7 @@ class GeminiChat(commands.Cog):
         
         self.silenced_until = {}
         self.forced_silence = {}
-        self.api_blocked_until = 0  # Circuit Breaker
+        self.api_blocked_until = 0
 
         self.TIMEOUT = 300
         self.COOLDOWN = 15
@@ -142,18 +132,12 @@ class GeminiChat(commands.Cog):
         
     @commands.Cog.listener()
     async def on_ready(self):
-        # Esperamos un poco para no saturar si el bot reconecta rápido
         logger.info("🤖 GeminiChat Cog listo. Verificando estado de APIs...")
-        
         working = await self.key_manager.find_working_key(self.MODEL_NAME)
-        
         if not working:
-            logger.error("💀 [SISTEMA] El bot arranca sin keys funcionales. Se activará Circuit Breaker.")
             self.api_blocked_until = time.time() + 60
-        else:
-            logger.info("🚀 [SISTEMA] Sistema Gemini inicializado correctamente.")
 
-    # ... (MÉTODOS DE MEMORIA Y UTILIDADES IGUALES) ...
+    # ... (MÉTODOS DE MEMORIA SIN CAMBIOS) ...
     def _load_memory(self):
         if not os.path.exists(MEMORY_FILE): return
         try:
@@ -187,115 +171,99 @@ class GeminiChat(commands.Cog):
 
     def _needs_intent_check(self, text):
         keywords = ["pon", "play", "skip", "siguiente", "para", "stop", "entra", "join", "sal", "leave", "musica"]
-        matches = any(k in text.lower() for k in keywords)
-        if matches:
-            logger.debug(f"🔍 [FILTER] Pasó filtro de intención: '{text}'")
-        return matches
+        return any(k in text.lower() for k in keywords)
 
     # =====================================================
-    # MANEJO DE EJECUCIÓN DE COMANDOS (AQUÍ ES DONDE EXPLOTA)
+    # EJECUCIÓN DE COMANDOS
     # =====================================================
     async def _handle_intent(self, intent, message):
-        logger.info("⚙️ [ACTION] Iniciando ejecución de comando...")
-        
-        # 1. VERIFICAR COG
-        # IMPORTANTE: Asegúrate de que tu Music Cog se llama "MusicCog" en el setup del bot
-        music_cog = self.bot.get_cog("MusicLocal") 
-        
-        if not music_cog:
-            logger.error("❌ [ACTION-ERROR] No se encontró el Cog 'MusicCog'. ¿Está cargado? ¿Tiene otro nombre?")
-            await message.channel.send("no encuentro mis funciones de musica (cog not loaded)")
-            return
+        music_cog = self.bot.get_cog("MusicCog") # Asegúrate que coincida con tu bot
+        if not music_cog: return
 
         i = intent["intent"]
         q = intent.get("query")
         
-        logger.info(f"▶️ [ACTION-EXEC] Intent: {i} | Query: {q}")
-
-        # 2. EJECUCIÓN SEGURA
         try:
             if i == "play_music":
                 if q:
                     await message.channel.send(f"va, pongo `{q}`")
-                    # VERIFICA QUE play_query EXISTA EN TU MUSIC BOT
-                    if hasattr(music_cog, "play"):
-                        await music_cog.play_query(message, q)
-                    else:
-                        logger.error("❌ [METHOD-ERROR] 'MusicCog' no tiene método 'play_query'.")
-                        await message.channel.send("error interno: no sé como poner musica (metodo incorrecto)")
+                    if hasattr(music_cog, "play_query"): await music_cog.play_query(message, q)
                 else:
-                    await message.channel.send("que pongo? no entendí la canción")
+                    await message.channel.send("que pongo?")
 
             elif i == "skip_music":
                 if hasattr(music_cog, "skip"): await music_cog.skip(message)
-                else: logger.error("❌ MusicCog sin metodo skip")
 
             elif i == "stop_music":
                 if hasattr(music_cog, "stop"): await music_cog.stop(message)
-                else: logger.error("❌ MusicCog sin metodo stop")
 
             elif i == "join_voice":
                 if hasattr(music_cog, "join"): await music_cog.join(message)
-                else: logger.error("❌ MusicCog sin metodo join")
-
+            
             elif i == "leave_voice":
                 if hasattr(music_cog, "leave"): await music_cog.leave(message)
-                else: logger.error("❌ MusicCog sin metodo leave")
-            
-            logger.info("✅ [ACTION-SUCCESS] Comando ejecutado correctamente.")
 
         except Exception as e:
-            # ESTO TE MOSTRARÁ EL ERROR REAL
-            logger.error(f"💥 [CRITICAL ERROR] Excepción al ejecutar comando:\n{traceback.format_exc()}")
-            await message.channel.send("exploté intentando hacer eso, mira la consola")
+            logger.error(f"Error action: {e}")
+            await message.channel.send("error ejecutando acción")
 
     # =====================================================
-    # DETECCIÓN SEGURA (CON RETRY Y CIRCUIT BREAKER)
+    # DETECCIÓN INTENCIÓN (ARREGLO LOOP)
     # =====================================================
     async def _handle_intent_safe(self, message, clean):
-        for attempt in range(2):
+        # FIX 1: Usamos len(keys) para intentar todas las llaves disponibles
+        total_keys = len(self.key_manager.keys)
+        
+        for attempt in range(total_keys):
             try:
                 intent = await self.intent_ai.detect(clean)
-                
                 if intent["intent"] != "none":
                     await self._handle_intent(intent, message)
                     return True 
-                
                 return False 
-
             except ResourceExhausted:
-                if attempt == 0:
-                    logger.warning(f"⚠️ [INTENT-QUOTA] Key #{self.key_manager.current_index} agotada. Rotando...")
-                    self.key_manager.rotate()
-                    continue 
-                else:
-                    logger.error("⛔ [INTENT-BLOCK] Ambas keys muertas. Activando Circuit Breaker (60s).")
+                # Si es el último intento y falló, activamos circuit breaker
+                if attempt == total_keys - 1:
+                    logger.error("⛔ [INTENT] Todas las keys agotadas. Block 60s.")
                     self.api_blocked_until = time.time() + 60
                     return False
-            
-            except Exception as e:
-                logger.error(f"❌ [INTENT-EXCEPTION] {e}")
-                return False
+                else:
+                    logger.warning(f"⚠️ [INTENT] Key {self.key_manager.current_index} agotada. Rotando.")
+                    self.key_manager.rotate()
+            except Exception: return False
         return False
 
     # =====================================================
-    # CHAT LÓGICA
+    # CHAT LÓGICA (ARREGLO IDENTIDAD)
     # =====================================================
     def _get_chat_session(self, cid):
         if cid not in self.chats:
-            model = genai.GenerativeModel(model_name=self.MODEL_NAME, system_instruction="habla corto y casual")
+            # FIX 2: Instrucción de sistema para entender formato "Usuario: mensaje"
+            system_prompt = (
+                "Eres un participante más en un chat grupal de Discord.\n"
+                "Los mensajes te llegarán en formato 'NombreUsuario: Mensaje'.\n"
+                "Responde al mensaje, dirigiéndote a la persona correcta si es necesario.\n"
+                "Tu personalidad: casual, breve, minúsculas, gracioso."
+            )
+            model = genai.GenerativeModel(model_name=self.MODEL_NAME, system_instruction=system_prompt)
             history = list(self.histories.get(cid, deque()))
             self.chats[cid] = model.start_chat(history=history)
         return self.chats[cid]
 
-    async def _attempt_chat_reply(self, cid, text):
+    async def _attempt_chat_reply(self, cid, text, username):
         chat = self._get_chat_session(cid)
-        logger.info(f"💬 [CHAT] Enviando a Gemini (Key idx {self.key_manager.current_index}): {text}")
-        response = await chat.send_message_async(text)
+        
+        # FIX 2: Inyectamos el nombre del usuario en el prompt
+        prompt_with_identity = f"{username}: {text}"
+        
+        logger.info(f"💬 [CHAT] Enviando: {prompt_with_identity}")
+        response = await chat.send_message_async(prompt_with_identity)
         
         hist = self.histories.setdefault(cid, deque(maxlen=10))
-        hist.append({"role": "user", "parts": [text]})
+        # Guardamos el historial CON el nombre para que tenga contexto futuro
+        hist.append({"role": "user", "parts": [prompt_with_identity]})
         hist.append({"role": "model", "parts": [response.text]})
+        
         return response.text
 
     # =====================================================
@@ -304,53 +272,51 @@ class GeminiChat(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
-
-        # Circuit Breaker Check
-        if time.time() < self.api_blocked_until:
-            return # Silent block
+        if time.time() < self.api_blocked_until: return
 
         cid = str(message.channel.id)
         clean = message.content.strip()
+        username = message.author.display_name # Nombre legible del usuario
         now = time.time()
         
         if not clean: return
 
-        # Updates Memory (Omitido logs para no spamear)
         self._update_channel_mood(cid, clean)
         self._update_user_memory(str(message.author.id), clean, False)
 
-        # 1. INTENT CHECK
+        # 1. Intent Check
         if self._needs_intent_check(clean):
-            handled = await self._handle_intent_safe(message, clean)
-            if handled:
+            if await self._handle_intent_safe(message, clean):
                 self.last_bot_reply[cid] = now
                 return 
 
-        # 2. CHAT CHECK
+        # 2. Chat Check
         is_mentioned = self.bot.user in message.mentions
-        should_reply = is_mentioned
-        
-        if not should_reply and (now - self.last_bot_reply.get(cid, 0) > self.COOLDOWN):
-            if random.random() < self.BASE_CHANCE:
-                should_reply = True
+        should_reply = is_mentioned or (
+            now - self.last_bot_reply.get(cid, 0) > self.COOLDOWN and 
+            random.random() < self.BASE_CHANCE
+        )
 
         if should_reply:
             async with message.channel.typing():
                 reply_text = None
-                for attempt in range(2):
+                total_keys = len(self.key_manager.keys)
+
+                # FIX 1: Bucle dinámico según cantidad de keys
+                for attempt in range(total_keys):
                     try:
-                        reply_text = await self._attempt_chat_reply(cid, clean)
+                        # Pasamos el username aquí
+                        reply_text = await self._attempt_chat_reply(cid, clean, username)
                         break
                     except ResourceExhausted:
-                        if attempt == 0:
-                            logger.warning("⚠️ [CHAT-QUOTA] Key agotada. Rotando y reintentando...")
-                            self.key_manager.rotate()
-                            if cid in self.chats: del self.chats[cid]
-                            continue
-                        else:
-                            logger.error("⛔ [CHAT-BLOCK] Ambas keys muertas. Circuit Breaker activado.")
+                        if attempt == total_keys - 1:
+                            logger.error("⛔ [CHAT] Todas las keys muertas.")
                             self.api_blocked_until = time.time() + 60
                             reply_text = "estoy frito..."
+                        else:
+                            logger.warning("⚠️ [CHAT] Key agotada. Rotando.")
+                            self.key_manager.rotate()
+                            if cid in self.chats: del self.chats[cid]
                     except Exception as e:
                         logger.error(f"❌ [CHAT-ERROR] {e}")
                         break
