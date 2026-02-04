@@ -26,7 +26,6 @@ class AIChat(commands.Cog):
         # Añadimos el nuevo mensaje del usuario al contexto
         context.append({'role': 'user', 'content': prompt})
 
-        # Llamada a Ollama (en hilo separado para no bloquear)
         response = await asyncio.to_thread(
             ollama.chat,
             model=self.model,
